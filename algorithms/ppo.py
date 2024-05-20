@@ -25,7 +25,7 @@ class ActorCritic(nn.Module):
         return policy, value
 
 class PPOAgent:
-    def __init__(self, env, gamma=0.99, lr=3e-4, eps_clip=0.2, K_epochs=4, lambd=0.95):
+    def __init__(self, env, gamma=0.99, lr=1e-4, eps_clip=0.2, K_epochs=4, lambd=0.95):
         self.env = env
         self.gamma = gamma
         self.lr = lr
@@ -73,18 +73,27 @@ class PPOAgent:
         state = self.env.reset()
         if isinstance(state, tuple):
             state = state[0]
+        episode_rewards = []
         for t in range(max_timesteps):
             action, value, log_prob = self.select_action(state)
-            next_state, reward, done, _, _ = self.env.step(action)
+            next_state, reward, done, _ , _= self.env.step(action)
             if isinstance(next_state, tuple):
                 next_state = next_state[0]
             mask = 1 - done
             self.store_transition((state, action, reward, value, mask, log_prob))
             state = next_state
+            episode_rewards.append(reward)
             if done:
                 state = self.env.reset()
                 if isinstance(state, tuple):
                     state = state[0]
+
+        # Normalize rewards
+        mean_reward = np.mean(episode_rewards)
+        std_reward = np.std(episode_rewards)
+        for i in range(len(self.memory)):
+            self.memory[i] = (self.memory[i][0], self.memory[i][1], (self.memory[i][2] - mean_reward) / (std_reward + 1e-8),
+                              self.memory[i][3], self.memory[i][4], self.memory[i][5])
 
     def compute_gae(self, rewards, values, masks, next_value):
         values = values + (next_value,)  # Convert list to tuple before concatenating
@@ -105,23 +114,61 @@ class PPOAgent:
         advantages = returns - torch.FloatTensor(values).to(self.device)
         old_log_probs = torch.FloatTensor(old_log_probs).to(self.device)
 
+        batch_size = 64  # Set your batch size here
+        num_batches = len(states) // batch_size
+
         for _ in range(self.K_epochs):
-            for state, action, return_, advantage, old_log_prob in zip(states, actions, returns, advantages, old_log_probs):
-                state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-                action = torch.FloatTensor(action).unsqueeze(0).to(self.device)
-                return_ = torch.FloatTensor([return_]).to(self.device)
-                advantage = torch.FloatTensor([advantage]).to(self.device)
-                old_log_prob = torch.FloatTensor([old_log_prob]).to(self.device)
+            for i in range(num_batches):
+                start = i * batch_size
+                end = start + batch_size
+
+                state = torch.tensor(states[start:end], dtype=torch.float32).to(self.device)
+                action = torch.tensor(actions[start:end], dtype=torch.float32).to(self.device)
+                return_ = torch.tensor(returns[start:end], dtype=torch.float32).to(self.device)
+                advantage = torch.tensor(advantages[start:end], dtype=torch.float32).to(self.device)
+                old_log_prob = torch.tensor(old_log_probs[start:end], dtype=torch.float32).to(self.device)
 
                 policy, value = self.model(state)
                 log_prob = -0.5 * ((action - policy) ** 2).sum(dim=1, keepdim=True)
+                
+                # Check for NaNs in log_prob
+                if torch.isnan(log_prob).any():
+                    print("NaN detected in log_prob")
+                    print("log_prob:", log_prob)
+                    continue
+
                 ratio = torch.exp(log_prob - old_log_prob)
+                
+                # Check for NaNs in ratio
+                if torch.isnan(ratio).any():
+                    print("NaN detected in ratio")
+                    print("ratio:", ratio)
+                    continue
+
                 surr1 = ratio * advantage
                 surr2 = torch.clamp(ratio, 1.0 - self.eps_clip, 1.0 + self.eps_clip) * advantage
+                
+                # Check for NaNs in surr1 and surr2
+                if torch.isnan(surr1).any() or torch.isnan(surr2).any():
+                    print("NaN detected in surr1 or surr2")
+                    print("surr1:", surr1)
+                    print("surr2:", surr2)
+                    continue
+
                 loss = -torch.min(surr1, surr2).mean() + 0.5 * nn.MSELoss()(value.squeeze(), return_.squeeze())
+
+                # Check for NaNs in loss
+                if torch.isnan(loss).any():
+                    print("NaN detected in loss")
+                    print("loss:", loss)
+                    continue
 
                 self.optimizer.zero_grad()
                 loss.backward()
+
+                # Gradient Clipping
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)
+
                 self.optimizer.step()
 
         self.memory = []
@@ -151,8 +198,7 @@ class PPOAgent:
         end_time = time.time()
         print(f"Training completed in {end_time - start_time} seconds")
 
-
-    def visualize(self, max_timesteps):
+    def visualize(self, max_timesteps=200):      
         state = self.env.reset()
         if isinstance(state, tuple):
             state = state[0]
