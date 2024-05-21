@@ -188,11 +188,12 @@ class PPOAgent:
             print(f"Episode {episode + 1}/{episodes} completed, Total Reward: {episode_rewards}")
         
         # Plotting the rewards
+        '''
         plt.plot(rewards_per_episode)
         plt.xlabel('Episode')
         plt.ylabel('Total Reward')
         plt.title('Training Rewards')
-        plt.show()
+        plt.show()'''
         # save the model
         self.save_model()
         end_time = time.time()

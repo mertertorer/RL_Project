@@ -27,4 +27,4 @@ def test_visualize_agent(path):
 
 if __name__ == "__main__":
     #test_train_agent()
-    test_visualize_agent('ppo_model_2024-05-20_19-47-32.pth')
+    test_visualize_agent('ppo_model_2024-05-21_01-53-58.pth')
