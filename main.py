@@ -11,8 +11,8 @@ if torch.cuda.is_available():
 
 def test_train_agent():
     env = gym.make('Pendulum-v1')
-    agent = PPOAgent(env)
-    agent.train(episodes=20, max_timesteps=1000)
+    agent = PPOAgent(env, device="cpu")
+    agent.train(episodes=2000, max_timesteps=400)
     print("Training completed")
 
 def test_visualize_agent(path):
@@ -23,8 +23,8 @@ def test_visualize_agent(path):
     agent.load_model(path)
     
     # Visualize the agent's performance
-    agent.visualize(max_timesteps=200)
+    agent.visualize(max_timesteps=2000)
 
 if __name__ == "__main__":
     #test_train_agent()
-    test_visualize_agent('ppo_model_2024-05-21_01-53-58.pth')
+    test_visualize_agent('ppo_model.pth')
