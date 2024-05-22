@@ -12,20 +12,31 @@ from torch.cuda.amp import GradScaler, autocast
 class ActorCritic(nn.Module):
     def __init__(self, input_dim, action_dim):
         super(ActorCritic, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 64)
-        self.fc2 = nn.Linear(64, 64)
-        self.actor = nn.Linear(64, action_dim)
-        self.critic = nn.Linear(64, 1)
+
+        # TODO: You might have different actor for continuous and discrete action spaces
+        self.actor = nn.Sequential( 
+            nn.Linear(input_dim, 64),
+            nn.Tanh(),
+            nn.Linear(64, 64),
+            nn.Tanh(),
+            nn.Linear(64, action_dim),
+            nn.Tanh(),
+        )
+        self.critic = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.Tanh(),
+            nn.Linear(64, 64),
+            nn.Tanh(),
+            nn.Linear(64, 1),
+        )
 
     def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
         policy = self.actor(x)
         value = self.critic(x)
         return policy, value
 
 class PPOAgent:
-    def __init__(self, env, gamma=0.99, lr=1e-4, eps_clip=0.2, K_epochs=4, lambd=0.95):
+    def __init__(self, env, gamma=0.99, lr=1e-3, eps_clip=0.2, K_epochs=10, lambd=0.95, device="cpu"):
         self.env = env
         self.gamma = gamma
         self.lr = lr
@@ -33,25 +44,27 @@ class PPOAgent:
         self.K_epochs = K_epochs
         self.lambd = lambd
         self.memory = []
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() and device=="cuda" else "cpu")
         self.model = ActorCritic(env.observation_space.shape[0], env.action_space.shape[0]).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
         self.scaler = GradScaler()
 
     def select_action(self, state):
+        min_action = self.env.action_space.low
+        max_action = self.env.action_space.high
         if isinstance(state, tuple):
             state = state[0]
         if not isinstance(state, np.ndarray):
             state = np.array(state)
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         policy, value = self.model(state)
-        action = torch.tanh(policy).detach().cpu().numpy().flatten()
+        action = (torch.tanh(policy).detach().cpu().numpy().flatten()+1)/2 * (max_action - min_action) + min_action
         log_prob = -0.5 * ((torch.FloatTensor(action).to(self.device) - policy) ** 2).sum(dim=1)
         return action, value.item(), log_prob.item()
 
     def save_model(self):
         current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        path = f"ppo_model_{current_time}.pth"
+        path = "ppo_model.pth" #f"ppo_model_{current_time}.pth"
         try:
             print(f"Saving model to: {os.path.abspath(path)}")  # Print the absolute path
             torch.save(self.model.state_dict(), path)
@@ -77,6 +90,9 @@ class PPOAgent:
         for t in range(max_timesteps):
             action, value, log_prob = self.select_action(state)
             next_state, reward, done, _ , _= self.env.step(action)
+            # reward = reward/16.2736044 # Normalize reward
+            #give reward for positive y and penalize for negative y 
+           
             if isinstance(next_state, tuple):
                 next_state = next_state[0]
             mask = 1 - done
@@ -89,11 +105,12 @@ class PPOAgent:
                     state = state[0]
 
         # Normalize rewards
-        mean_reward = np.mean(episode_rewards)
-        std_reward = np.std(episode_rewards)
-        for i in range(len(self.memory)):
-            self.memory[i] = (self.memory[i][0], self.memory[i][1], (self.memory[i][2] - mean_reward) / (std_reward + 1e-8),
-                              self.memory[i][3], self.memory[i][4], self.memory[i][5])
+        
+        # mean_reward = np.mean(episode_rewards)
+        # std_reward = np.std(episode_rewards)
+        # for i in range(len(self.memory)):
+        #     self.memory[i] = (self.memory[i][0], self.memory[i][1], (self.memory[i][2] - mean_reward) / (std_reward + 1e-8),
+        #                       self.memory[i][3], self.memory[i][4], self.memory[i][5])
 
     def compute_gae(self, rewards, values, masks, next_value):
         values = values + (next_value,)  # Convert list to tuple before concatenating
@@ -114,13 +131,17 @@ class PPOAgent:
         advantages = returns - torch.FloatTensor(values).to(self.device)
         old_log_probs = torch.FloatTensor(old_log_probs).to(self.device)
 
-        batch_size = 64  # Set your batch size here
-        num_batches = len(states) // batch_size
+        batch_size = 32  # Set your batch size here
+        num_batches = (len(states) + batch_size - 1) // batch_size
 
-        for _ in range(self.K_epochs):
+        
+        for _ in range(self.K_epochs): 
             for i in range(num_batches):
+               
                 start = i * batch_size
                 end = start + batch_size
+                if end > len(states):
+                    end = len(states)
 
                 state = torch.tensor(states[start:end], dtype=torch.float32).to(self.device)
                 action = torch.tensor(actions[start:end], dtype=torch.float32).to(self.device)
@@ -179,25 +200,27 @@ class PPOAgent:
         for episode in range(episodes):
             episode_rewards = 0
             self.collect_trajectories(max_timesteps)
-            self.optimize()
             for transition in self.memory:
                 _, _, reward, _, _, _ = transition
                 episode_rewards += reward
             rewards_per_episode.append(episode_rewards)
+            self.optimize()
             self.clear_memory()
-            print(f"Episode {episode + 1}/{episodes} completed, Total Reward: {episode_rewards}")
+            if (episode + 1) % 100 == 0 or episode == 0:
+                print(f"Episode {episode + 1}/{episodes} completed, Total Reward: {episode_rewards}")
         
         # Plotting the rewards
-        '''
+        
+        end_time = time.time()
+        print(f"Training completed in {end_time - start_time} seconds")
+        # save the model
+        self.save_model()
+
         plt.plot(rewards_per_episode)
         plt.xlabel('Episode')
         plt.ylabel('Total Reward')
         plt.title('Training Rewards')
-        plt.show()'''
-        # save the model
-        self.save_model()
-        end_time = time.time()
-        print(f"Training completed in {end_time - start_time} seconds")
+        plt.show()
 
     def visualize(self, max_timesteps=200):      
         state = self.env.reset()
@@ -206,7 +229,13 @@ class PPOAgent:
         for t in range(max_timesteps):
             self.env.render()
             action, _, _ = self.select_action(state)
-            next_state, _, done, _, _ = self.env.step(action)
+            next_state, reward, done, _, _ = self.env.step(action)
+            if state[0] <= 0.2:
+                reward = reward -0.5
+            else:
+                if np.abs(state[2]) > 3:
+                    reward = reward - 0.5
+            print("Action:", action, "State:", state, "Reward:", reward)
             if isinstance(next_state, tuple):
                 next_state = next_state[0]
             state = next_state
