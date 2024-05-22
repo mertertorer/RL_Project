@@ -15,11 +15,11 @@ class ActorCritic(nn.Module):
 
         # TODO: You might have different actor for continuous and discrete action spaces
         self.actor = nn.Sequential( 
-            nn.Linear(input_dim, 64),
+            nn.Linear(input_dim, 256),
             nn.Tanh(),
-            nn.Linear(64, 64),
+            nn.Linear(256, 256),
             nn.Tanh(),
-            nn.Linear(64, action_dim),
+            nn.Linear(256, action_dim),
             nn.Tanh(),
         )
         self.critic = nn.Sequential(
@@ -36,7 +36,7 @@ class ActorCritic(nn.Module):
         return policy, value
 
 class PPOAgent:
-    def __init__(self, env, gamma=0.99, lr=1e-3, eps_clip=0.2, K_epochs=10, lambd=0.95, device="cpu"):
+    def __init__(self, env, gamma=0.99, lr=5e-4, eps_clip=0.2, K_epochs=10, lambd=0.95, device="cpu"):
         self.env = env
         self.gamma = gamma
         self.lr = lr
