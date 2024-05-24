@@ -8,20 +8,31 @@ import matplotlib.pyplot as plt
 import os
 import time
 from torch.cuda.amp import GradScaler, autocast
+from torch.distributions import Categorical
 
 class ActorCritic(nn.Module):
-    def __init__(self, input_dim, action_dim):
+    def __init__(self, input_dim, action_dim, env_name):
         super(ActorCritic, self).__init__()
 
-        # TODO: You might have different actor for continuous and discrete action spaces
-        self.actor = nn.Sequential( 
-            nn.Linear(input_dim, 256),
-            nn.Tanh(),
-            nn.Linear(256, 256),
-            nn.Tanh(),
-            nn.Linear(256, action_dim),
-            nn.Tanh(),
-        )
+        if env_name == 'Pendulum-v1':
+            self.actor = nn.Sequential( 
+                nn.Linear(input_dim, 256),
+                nn.Tanh(),
+                nn.Linear(256, 256),
+                nn.Tanh(),
+                nn.Linear(256, action_dim),
+                nn.Tanh(),
+            )
+        else: # Discrete actor for CartPole-v1
+            self.actor = nn.Sequential(
+                nn.Linear(input_dim, 256),
+                nn.Tanh(),
+                nn.Linear(256, 256),
+                nn.Tanh(),
+                nn.Linear(256, action_dim),
+                nn.Tanh(),
+                nn.Softmax(dim=-1),
+            )
         self.critic = nn.Sequential(
             nn.Linear(input_dim, 64),
             nn.Tanh(),
@@ -36,7 +47,7 @@ class ActorCritic(nn.Module):
         return policy, value
 
 class PPOAgent:
-    def __init__(self, env, gamma=0.99, lr=5e-4, eps_clip=0.2, K_epochs=10, lambd=0.95, device="cpu"):
+    def __init__(self, env,episodes, max_timesteps, gamma=0.99, lr=5e-4, eps_clip=0.2, K_epochs=10, lambd=0.95, device="cpu", env_name='Pendulum-v1'):
         self.env = env
         self.gamma = gamma
         self.lr = lr
@@ -44,27 +55,42 @@ class PPOAgent:
         self.K_epochs = K_epochs
         self.lambd = lambd
         self.memory = []
+        self.env_name = env_name
+        self.episodes = episodes
+        self.max_timesteps = max_timesteps
         self.device = torch.device("cuda" if torch.cuda.is_available() and device=="cuda" else "cpu")
-        self.model = ActorCritic(env.observation_space.shape[0], env.action_space.shape[0]).to(self.device)
+        if self.env_name == 'Pendulum-v1':
+            self.model = ActorCritic(env.observation_space.shape[0], env.action_space.shape[0],env_name=self.env_name).to(self.device)
+        else: # Discrete action space for CartPole-v1
+            self.model = ActorCritic(env.observation_space.shape[0], env.action_space.n,env_name=self.env_name).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
         self.scaler = GradScaler()
 
     def select_action(self, state):
-        min_action = self.env.action_space.low
-        max_action = self.env.action_space.high
+
+        
         if isinstance(state, tuple):
             state = state[0]
         if not isinstance(state, np.ndarray):
             state = np.array(state)
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         policy, value = self.model(state)
-        action = (torch.tanh(policy).detach().cpu().numpy().flatten()+1)/2 * (max_action - min_action) + min_action
-        log_prob = -0.5 * ((torch.FloatTensor(action).to(self.device) - policy) ** 2).sum(dim=1)
-        return action, value.item(), log_prob.item()
+        if self.env_name== 'Pendulum-v1':
+            min_action = self.env.action_space.low
+            max_action = self.env.action_space.high
+            action = (torch.tanh(policy).detach().cpu().numpy().flatten()+1)/2 * (max_action - min_action) + min_action
+            log_prob = -0.5 * ((torch.FloatTensor(action).to(self.device) - policy) ** 2).sum(dim=1)     
+        else: # Discrete action space for CartPole-v1
+            dist = Categorical(policy)
+            action = dist.sample().item()
+            log_prob = dist.log_prob(torch.tensor(action, dtype=torch.long).to(self.device))  # Adjust log_prob calculation
+        return action, value.item(), log_prob.item()    
 
     def save_model(self):
         current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        path = "ppo_model.pth" #f"ppo_model_{current_time}.pth"
+        # set path as f"models/ppo_model_E_{self.episodes}_TS_{self.max_timesteps}_{current_time}.pth"
+        path = f"models/ppo_model_{self.env_name}_E_{self.episodes}_TS_{self.max_timesteps}_{current_time}.pth"
+        
         try:
             print(f"Saving model to: {os.path.abspath(path)}")  # Print the absolute path
             torch.save(self.model.state_dict(), path)
@@ -82,17 +108,17 @@ class PPOAgent:
     def clear_memory(self):
         self.memory = []
 
-    def collect_trajectories(self, max_timesteps):
+    def collect_trajectories(self):
         state = self.env.reset()
         if isinstance(state, tuple):
             state = state[0]
         episode_rewards = []
-        for t in range(max_timesteps):
+        for t in range(self.max_timesteps):
             action, value, log_prob = self.select_action(state)
             next_state, reward, done, _ , _= self.env.step(action)
             # reward = reward/16.2736044 # Normalize reward
             #give reward for positive y and penalize for negative y 
-           
+            #print("State:", state, "Action:", action, "Reward:", reward)
             if isinstance(next_state, tuple):
                 next_state = next_state[0]
             mask = 1 - done
@@ -103,6 +129,7 @@ class PPOAgent:
                 state = self.env.reset()
                 if isinstance(state, tuple):
                     state = state[0]
+                break
 
         # Normalize rewards
         
@@ -150,8 +177,12 @@ class PPOAgent:
                 old_log_prob = torch.tensor(old_log_probs[start:end], dtype=torch.float32).to(self.device)
 
                 policy, value = self.model(state)
-                log_prob = -0.5 * ((action - policy) ** 2).sum(dim=1, keepdim=True)
-                
+                if self.env_name== 'Pendulum-v1':
+                    log_prob = -0.5 * ((action - policy) ** 2).sum(dim=1, keepdim=True)
+                else: # Discrete action space for CartPole-v1
+                    dist = Categorical(policy)
+                    log_prob = dist.log_prob(torch.tensor(action, dtype=torch.long).to(self.device))  # Adjust log_prob calculation
+
                 # Check for NaNs in log_prob
                 if torch.isnan(log_prob).any():
                     print("NaN detected in log_prob")
@@ -194,51 +225,106 @@ class PPOAgent:
 
         self.memory = []
 
-    def train(self, episodes, max_timesteps):
+    def train(self):
+
         rewards_per_episode = []
+        last_reward_per_episode = []
         start_time = time.time()  # Capture start time of training
-        for episode in range(episodes):
+        for episode in range(self.episodes):
             episode_rewards = 0
-            self.collect_trajectories(max_timesteps)
+            self.collect_trajectories()
             for transition in self.memory:
                 _, _, reward, _, _, _ = transition
                 episode_rewards += reward
+            last_reward_per_episode.append(reward)
             rewards_per_episode.append(episode_rewards)
             self.optimize()
             self.clear_memory()
             if (episode + 1) % 100 == 0 or episode == 0:
-                print(f"Episode {episode + 1}/{episodes} completed, Total Reward: {episode_rewards}")
+                print(f"Episode {episode + 1}/{self.episodes} completed, Total Reward: {episode_rewards}")
         
         # Plotting the rewards
-        
         end_time = time.time()
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         print(f"Training completed in {end_time - start_time} seconds")
         # save the model
         self.save_model()
-
+        path = f"plots/ppo_model_rewards_{self.env_name}_E_{self.episodes}_TS_{self.max_timesteps}_{current_time}.png"
         plt.plot(rewards_per_episode)
+        plt.axhline(y=0, color='r', linestyle='--')
         plt.xlabel('Episode')
         plt.ylabel('Total Reward')
         plt.title('Training Rewards')
-        plt.show()
+        
+        plt.savefig(path)
+        plt.close()
 
-    def visualize(self, max_timesteps=200):      
-        state = self.env.reset()
-        if isinstance(state, tuple):
-            state = state[0]
-        for t in range(max_timesteps):
-            self.env.render()
-            action, _, _ = self.select_action(state)
-            next_state, reward, done, _, _ = self.env.step(action)
-            if state[0] <= 0.2:
-                reward = reward -0.5
-            else:
-                if np.abs(state[2]) > 3:
-                    reward = reward - 0.5
-            print("Action:", action, "State:", state, "Reward:", reward)
-            if isinstance(next_state, tuple):
-                next_state = next_state[0]
-            state = next_state
-            if done:
-                break
+        #plot and save last rewards
+
+        plt.plot(last_reward_per_episode)
+        plt.axhline(y=0, color='r', linestyle='--')
+        plt.xlabel('Episode')
+        plt.ylabel('Reward at last timestep')
+        plt.title('Performance of the trained agent at last timestep')
+        path = f"plots/ppo_model_last_rewards_{self.env_name}_E_{self.episodes}_TS_{self.max_timesteps}_{current_time}.png"
+        plt.savefig(path)
+        plt.close()
+
+        return rewards_per_episode, last_reward_per_episode
+
+
+    def visualize(self, iter = 5):      
+        
+        rewards_per_episode = []
+        last_reward_per_episode = []
+        for i in range(iter):
+            last_reward = 0
+            state = self.env.reset()
+            if isinstance(state, tuple):
+                state = state[0]
+            episode_reward = 0
+            for t in range(self.max_timesteps):
+                self.env.render()
+                action, _, _ = self.select_action(state)
+                next_state, reward, done, _, _ = self.env.step(action)
+                episode_reward += reward
+                if isinstance(next_state, tuple):
+                    next_state = next_state[0]
+                state = next_state
+                if done:
+                    break
+                if t == self.max_timesteps - 1:
+                    last_reward_per_episode.append(reward)
+            print(f"Iteration: {i + 1}, Reward: {episode_reward}")
+            rewards_per_episode.append(episode_reward)
         self.env.close()
+        
+        # Plotting the rewards and max possible reward
+        if self.env_name == 'Pendulum-v1':
+            max_possible_reward = 0
+            plt.plot(rewards_per_episode)
+            plt.axhline(y=max_possible_reward, color='r', linestyle='--')
+            plt.xlabel('Episode')
+            plt.ylabel('Total Reward')
+            plt.title('Performance of the trained agent')
+            plt.savefig(f'plots/ppo_rewards_{self.env_name}.png')
+            plt.close()
+
+            plt.plot(last_reward_per_episode)
+            plt.axhline(y=max_possible_reward, color='r', linestyle='--')
+            plt.xlabel('Iteration')
+            plt.ylabel('Reward at last timestep')
+            plt.title('Performance of the trained agent at last timestep')
+            plt.savefig(f'plots/ppo_last_rewards_{self.env_name}.png')
+            plt.close()
+        else:
+            max_possible_reward = self.max_timesteps
+            plt.plot(rewards_per_episode)
+            plt.axhline(y=max_possible_reward, color='r', linestyle='--')
+            plt.xlabel('Episode')
+            plt.ylabel('Total Reward')
+            plt.title('Performance of the trained agent')
+            plt.savefig(f'plots/ppo_rewards_{self.env_name}.png')
+            # close plot
+            plt.close()
+
