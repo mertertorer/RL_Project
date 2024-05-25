@@ -27,7 +27,7 @@ def test_visualize_agent(path, episodes, max_timesteps, env_name='Pendulum-v1'):
     agent.load_model(path)
     
     # Visualize the agent's performance
-    agent.visualize(iter = 200)
+    agent.visualize(iter = 20)
 
 def train_multiple_seeds(seed_name,env_name,seeds,num_episodes,max_timesteps,lr):
     all_performances =[]
@@ -77,12 +77,12 @@ if __name__ == "__main__":
     seeds = [4,11,9]
    #train_multiple_seeds(seed_name,env_name,seeds,num_episodes,max_timesteps,lr):
     
-    train_multiple_seeds("pendulum1","Pendulum-v1",seeds,8000,400,1e-4)
-    train_multiple_seeds("pendulum2","Pendulum-v1",seeds,8000,200,5e-4)
-    train_multiple_seeds("pendulum3","Pendulum-v1",seeds,8000,400,5e-5)
-    train_multiple_seeds("pendulum4","Pendulum-v1",[4,11,9,23],2000,500,1e-3)
-    train_multiple_seeds("pendulum5","Pendulum-v1",[4,11,9,23],2000,500,5e-4)
-    train_multiple_seeds("pendulum6","Pendulum-v1",[4,11,9,23],2000,500,1e-4)
+    # train_multiple_seeds("pendulum1","Pendulum-v1",seeds,8000,400,1e-4)
+    # train_multiple_seeds("pendulum2","Pendulum-v1",seeds,8000,200,5e-4)
+    train_multiple_seeds("pendulum8","Pendulum-v1",seeds,4000,400,5e-5)
+    # train_multiple_seeds("pendulum4","Pendulum-v1",[4,11,9,23],2000,500,1e-3)
+    # train_multiple_seeds("pendulum5","Pendulum-v1",[4,11,9,23],2000,500,5e-4)
+    # train_multiple_seeds("pendulum6","Pendulum-v1",[4,11,9,23],2000,500,1e-4)
     
 
     # test_train_agent('Pendulum-v1', episodes=4000, max_timesteps=400, lr = 5e-4)
@@ -97,5 +97,5 @@ if __name__ == "__main__":
     #test_train_agent('CartPole-v1', episodes=1000, max_timesteps=500)
     #test_train_agent('CartPole-v1')
     # visualizing the trained agent for 10 times  
-    # test_visualize_agent('models/ppo_model_Pendulum-v1_E_4000_TS_400_2024-05-23_18-20-52.pth',episodes = 2000 ,max_timesteps= 200, env_name='Pendulum-v1')
+    #test_visualize_agent('models/ppo_model_Pendulum-v1_E_20000_TS_400_2024-05-25_07-13-46.pth',episodes = 20000 ,max_timesteps= 400, env_name='Pendulum-v1')
     # test_visualize_agent('ppo_model_cartpole.pth', max_timesteps= 10, env_name='CartPole-v1')

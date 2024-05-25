@@ -47,10 +47,11 @@ class ActorCritic(nn.Module):
         return policy, value
 
 class PPOAgent:
-    def __init__(self, env,episodes, max_timesteps, gamma=0.99, lr=5e-4, eps_clip=0.2, K_epochs=10, lambd=0.95, device="cpu", env_name='Pendulum-v1'):
+    def __init__(self, env,episodes, max_timesteps,ent_const = 0.01, gamma=0.99, lr=5e-4, eps_clip=0.2, K_epochs=10, lambd=0.95, device="cpu", env_name='Pendulum-v1'):
         self.env = env
         self.gamma = gamma
         self.lr = lr
+        self.ent_const = ent_const
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
         self.lambd = lambd
@@ -183,6 +184,14 @@ class PPOAgent:
                     dist = Categorical(policy)
                     log_prob = dist.log_prob(torch.tensor(action, dtype=torch.long).to(self.device))  # Adjust log_prob calculation
 
+
+                # Calculate the entropy of the policy
+                if self.env_name== 'Pendulum-v1':
+                    dist_entropy = -0.5 * ((action - policy) ** 2).sum(dim=1, keepdim=True)
+                    dist_entropy = dist_entropy.mean()
+                else: # Discrete action space for CartPole-v1
+                    dist_entropy = dist.entropy().mean()
+
                 # Check for NaNs in log_prob
                 if torch.isnan(log_prob).any():
                     print("NaN detected in log_prob")
@@ -207,8 +216,7 @@ class PPOAgent:
                     print("surr2:", surr2)
                     continue
 
-                loss = -torch.min(surr1, surr2).mean() + 0.5 * nn.MSELoss()(value.squeeze(), return_.squeeze())
-
+                loss = -torch.min(surr1, surr2).mean() + 0.5 * nn.MSELoss()(value.squeeze(), return_.squeeze()) - self.ent_const * dist_entropy
                 # Check for NaNs in loss
                 if torch.isnan(loss).any():
                     print("NaN detected in loss")
@@ -302,6 +310,7 @@ class PPOAgent:
         # Plotting the rewards and max possible reward
         if self.env_name == 'Pendulum-v1':
             max_possible_reward = 0
+            min_last_reward = -16.2736044
             plt.plot(rewards_per_episode)
             plt.axhline(y=max_possible_reward, color='r', linestyle='--')
             plt.xlabel('Episode')
@@ -312,6 +321,7 @@ class PPOAgent:
 
             plt.plot(last_reward_per_episode)
             plt.axhline(y=max_possible_reward, color='r', linestyle='--')
+            plt.axhline(y=min_last_reward, color='r', linestyle='--')
             plt.xlabel('Iteration')
             plt.ylabel('Reward at last timestep')
             plt.title('Performance of the trained agent at last timestep')
