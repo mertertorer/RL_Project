@@ -101,12 +101,12 @@ plot_performances_multiple(all_performances)
 
 ### PPO on Pendulum-v1
 
-![PPO Training Reward Comparison on Pendulum](plots/PendulumHyperparamComp.png)
+![PPO Training Reward Comparison on Pendulum](PendulumHyperparamComp.png)
 *Figure: PPO Training Reward Comparison on Pendulum*
 
 ### DQN on CartPole-v1
 
-![DQN Training Reward Comparison on CartPole](plots/CartPoleHyperparamComp.png)
+![DQN Training Reward Comparison on CartPole](CartPoleHyperparamComp.png)
 *Figure: DQN Training Reward Comparison on CartPole*
 
 ## References
