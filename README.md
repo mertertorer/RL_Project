@@ -113,4 +113,3 @@ plot_performances_multiple(all_performances)
 
 - Schulman et al., "Proximal Policy Optimization Algorithms", 2017.
 - Mnih et al., "Human-level control through deep reinforcement learning", 2015.
-```
