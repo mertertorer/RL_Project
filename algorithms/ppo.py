@@ -159,7 +159,7 @@ class PPOAgent:
         advantages = returns - torch.FloatTensor(values).to(self.device)
         old_log_probs = torch.FloatTensor(old_log_probs).to(self.device)
 
-        batch_size = 32  # Set your batch size here
+        batch_size = 64  # Set your batch size here
         num_batches = (len(states) + batch_size - 1) // batch_size
 
         
@@ -307,6 +307,11 @@ class PPOAgent:
             rewards_per_episode.append(episode_reward)
         self.env.close()
         
+        path = f'perf_metrics/Evaluation_E_{self.episodes}_TS_{self.max_timesteps}_{self.lr}_rewards.npy'
+        path_last = f'perf_metrics/Evaluation_E_{self.episodes}_TS_{self.max_timesteps}_{self.lr}_rewards_last.npy'
+        np.save(path, rewards_per_episode)
+        np.save(path_last, last_reward_per_episode)
+    
         # Plotting the rewards and max possible reward
         if self.env_name == 'Pendulum-v1':
             max_possible_reward = 0
