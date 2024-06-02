@@ -77,7 +77,49 @@ plot_performances_multiple(all_performances)
 
 ### DQN Usage
 
-(To be added later)
+To train the DQN agent on CartPole-v1:
+```
+cd algorithms 
+python ./dqn_cartpole_tuning.py 
+    Change:
+        # Example of training with different hyperparameters
+        lr_values = [0.001, 0.0005, 0.0001]
+        gamma_values = [0.99, 0.95]
+        tau_values = [1e-3, 1e-2]
+    Models will be saved to the models/dqn_cartpole_{key}.pth where key = f"lr_{lr}_gamma_{gamma}_tau_{tau}"
+    Scores will be as scores_{key}.json on the algorithms directory
+
+```
+
+
+To tune the selected hyperparameter combinations over different seeds:
+```
+    python .\dqn_cartpole_top2tuning_seed.py
+```
+
+Visualize various plots to analyze:
+```
+    python .\plot_dqn_cartpole_tuning_seperately.py
+```
+
+To train the DQN agent on Pendulum:
+```
+    python .\dqn_modular_v2.py  (for 1 hyperparameter)
+    python .\dqn_modular_v2_seeds.py  (over different seeds)
+    python .\dqn_pendulum_hyperparam_seeds_v3.py (heperparameter combinations over different seeds)
+
+```
+In order to find the best hyperparameter combinations and plot the results (change the file directory and keys to visualise different models! ):
+```
+    python .\plot_dqn_best_hyperparameters.py
+```
+
+To evaluate the models:
+```
+    python .\dqn_eval_cartpole.py
+    python .\dqn_eval_pendulum.py
+```
+(To be functionalized later such that all tthe training, visualization and evaluation can be entered via one python file!)
 
 ## Hyperparameter Tuning
 
