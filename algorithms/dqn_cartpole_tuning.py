@@ -5,6 +5,9 @@ import torch.nn as nn
 import torch.optim as optim
 from collections import deque
 import random
+import json
+import matplotlib.pyplot as plt
+import os
 
 # Define the Q-network
 class QNetwork(nn.Module):
@@ -35,19 +38,19 @@ class ReplayMemory:
 
 # DQN Agent
 class DQNAgent:
-    def __init__(self, state_size, action_size, seed):
+    def __init__(self, state_size, action_size, seed, lr=0.001, gamma=0.99, tau=1e-3):
         self.state_size = state_size
         self.action_size = action_size
         self.seed = random.seed(seed)
 
         self.qnetwork_local = QNetwork(state_size, action_size)
         self.qnetwork_target = QNetwork(state_size, action_size)
-        self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=0.001)
+        self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
 
         self.memory = ReplayMemory(10000)
         self.batch_size = 64
-        self.gamma = 0.99
-        self.tau = 1e-3
+        self.gamma = gamma
+        self.tau = tau
 
     def step(self, state, action, reward, next_state, done):
         self.memory.push((state, action, reward, next_state, done))
@@ -93,39 +96,71 @@ class DQNAgent:
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(self.tau*local_param.data + (1.0-self.tau)*target_param.data)
 
-# Main training loop
-env = gym.make('CartPole-v1')
-state_size = env.observation_space.shape[0]
-action_size = env.action_space.n
-agent = DQNAgent(state_size, action_size, seed=0)
+def train_dqn(lr, gamma, tau, n_episodes=1000, max_t=1000, eps_start=1.0, eps_end=0.01, eps_decay=0.995, seed=0):
+    env = gym.make('CartPole-v1')
+    state_size = env.observation_space.shape[0]
+    action_size = env.action_space.n
+    agent = DQNAgent(state_size, action_size, seed, lr, gamma, tau)
 
-n_episodes = 1000
-max_t = 1000
-eps_start = 1.0
-eps_end = 0.01
-eps_decay = 0.995
+    eps = eps_start
+    scores = []
+    for i_episode in range(1, n_episodes+1):
+        state = env.reset()
+        if isinstance(state, tuple):
+            state = state[0]  # Extract the actual state from the tuple
+        total_reward = 0
+        for t in range(max_t):
+            action = agent.act(state, eps)
+            next_state, reward, terminated, truncated, info = env.step(action)
+            if isinstance(next_state, tuple):
+                next_state = next_state[0]  # Extract the actual next state from the tuple
+            done = terminated or truncated
+            agent.step(state, action, reward, next_state, done)
+            state = next_state
+            total_reward += reward
+            if done:
+                break
+        scores.append(total_reward)
+        eps = max(eps_end, eps_decay*eps)
+        if i_episode % 100 == 0:
+            print(f"Episode {i_episode}\tAverage Score: {np.mean(scores[-100:])}")
 
-eps = eps_start
-scores = []
-for i_episode in range(1, n_episodes+1):
-    state = env.reset()
-    if isinstance(state, tuple):
-        state = state[0]  # Extract the actual state from the tuple
-    total_reward = 0
-    for t in range(max_t):
-        action = agent.act(state, eps)
-        next_state, reward, terminated, truncated, info = env.step(action)
-        if isinstance(next_state, tuple):
-            next_state = next_state[0]  # Extract the actual next state from the tuple
-        done = terminated or truncated
-        agent.step(state, action, reward, next_state, done)
-        state = next_state
-        total_reward += reward
-        if done:
-            break
-    scores.append(total_reward)
-    eps = max(eps_end, eps_decay*eps)
-    if i_episode % 100 == 0:
-        print(f"Episode {i_episode}\tAverage Score: {np.mean(scores[-100:])}")
+    env.close()
 
-env.close()
+    return scores, agent.qnetwork_local.state_dict()
+
+# Example of training with different hyperparameters
+lr_values = [0.001, 0.0005, 0.0001]
+gamma_values = [0.99, 0.95]
+tau_values = [1e-3, 1e-2]
+
+results = {}
+if not os.path.exists('models'):
+    os.makedirs('models')
+
+for lr in lr_values:
+    for gamma in gamma_values:
+        for tau in tau_values:
+            print(f"Training with lr={lr}, gamma={gamma}, tau={tau}")
+            scores, model_state = train_dqn(lr, gamma, tau)
+            key = f"lr_{lr}_gamma_{gamma}_tau_{tau}"
+            results[key] = scores
+
+            # Save the model
+            model_path = f'models/dqn_cartpole_{key}.pth'
+            torch.save(model_state, model_path)
+
+            # Save the scores
+            with open(f'scores_{key}.json', 'w') as f:
+                json.dump(scores, f)
+
+# Plotting the results
+plt.figure(figsize=(12, 8))
+for key, scores in results.items():
+    plt.plot(scores, label=key)
+plt.xlabel('Episode')
+plt.ylabel('Score')
+plt.title('DQN Training Performance on CartPole-v1 with Different Hyperparameters')
+plt.legend()
+plt.show()
+
